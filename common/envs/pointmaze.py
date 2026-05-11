@@ -3,11 +3,55 @@ import gymnasium as gym
 from gymnasium import spaces
 
 
-class PointMazeGCWrapper(gym.Wrapper):
-    """Flattens PointMaze Dict obs (observation + desired_goal) into a single Box."""
+class PointMazeMultiGoalWrapper(gym.Wrapper):
+    """Multi-goal PointMaze: goal stripped from obs, reward vs nearest goal.
 
-    def __init__(self, env):
+    Observation = [x, y, vx, vy] (4-dim, no goal).
+    Reward = 0.0 if within threshold of ANY goal, else -1.0.
+    Episode never terminates early (continuing task); only truncates on timeout.
+    """
+
+    def __init__(self, env, threshold: float = 0.45):
         super().__init__(env)
+        self.threshold = threshold
+        self._goal_locations = np.array(env.unwrapped.maze.unique_goal_locations)  # (N, 2)
+        obs_dim = env.observation_space["observation"].shape[0]
+        self.observation_space = spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(obs_dim,),
+            dtype=np.float64,
+        )
+
+    def _compute_reward(self, achieved_pos):
+        dists = np.linalg.norm(self._goal_locations - achieved_pos, axis=-1)
+        return 0.0 if dists.min() <= self.threshold else -1.0
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        return obs["observation"].copy(), info
+
+    def step(self, action):
+        obs, _, _terminated, truncated, info = self.env.step(action)
+        reward = self._compute_reward(obs["achieved_goal"])
+        info["is_success"] = reward == 0.0
+        if "final_observation" in info and info["final_observation"] is not None:
+            fo = info["final_observation"]
+            info["final_observation"] = fo["observation"].copy()
+        return obs["observation"].copy(), reward, False, truncated, info
+
+
+class PointMazeGCWrapper(gym.Wrapper):
+    """Flattens PointMaze Dict obs (observation + desired_goal) into a single Box.
+
+    reward_offset is added to every reward.  Use -1 for sparse envs to shift
+    the {0, 1} signal to {-1, 0}, which is easier to learn from and matches
+    the convention used in the rest of the DIME codebase.
+    """
+
+    def __init__(self, env, reward_offset: float = 0.0):
+        super().__init__(env)
+        self.reward_offset = reward_offset
         obs_dim = env.observation_space["observation"].shape[0]
         goal_dim = env.observation_space["desired_goal"].shape[0]
         self.observation_space = spaces.Box(
@@ -32,7 +76,7 @@ class PointMazeGCWrapper(gym.Wrapper):
             info["final_observation"] = np.concatenate(
                 [fo["observation"], fo["desired_goal"]]
             )
-        return self._flat(obs), reward, terminated, truncated, info
+        return self._flat(obs), reward + self.reward_offset, terminated, truncated, info
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -156,14 +200,20 @@ def make_map(rows, cols, narrow_passage=False, init_radius=0):
 # Registration helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-# (base_gymnasium_robotics_id, default_max_episode_steps)
+# (base_gymnasium_robotics_id, max_episode_steps, reward_offset)
 _VARIANTS = {
-    "pointmaze/umaze-sparse-v0":  ("PointMaze_UMaze-v3",                  300),
-    "pointmaze/umaze-dense-v0":   ("PointMaze_UMazeDense-v3",              300),
-    "pointmaze/medium-sparse-v0": ("PointMaze_Medium_Diverse_GR-v3",       600),
-    "pointmaze/medium-dense-v0":  ("PointMaze_Medium_Diverse_GRDense-v3",  600),
-    "pointmaze/large-sparse-v0":  ("PointMaze_Large_Diverse_GR-v3",        800),
-    "pointmaze/large-dense-v0":   ("PointMaze_Large_Diverse_GRDense-v3",   800),
+    "pointmaze/umaze-sparse-v0":  ("PointMaze_UMaze-v3",                  300, -1.0),
+    "pointmaze/umaze-dense-v0":   ("PointMaze_UMazeDense-v3",              300,  0.0),
+    "pointmaze/medium-sparse-v0": ("PointMaze_Medium_Diverse_GR-v3",       600, -1.0),
+    "pointmaze/medium-dense-v0":  ("PointMaze_Medium_Diverse_GRDense-v3",  600,  0.0),
+    "pointmaze/large-sparse-v0":  ("PointMaze_Large_Diverse_GR-v3",        800, -1.0),
+    "pointmaze/large-dense-v0":   ("PointMaze_Large_Diverse_GRDense-v3",   800,  0.0),
+}
+
+# Multi-goal variants: (base_id, max_episode_steps, threshold)
+_MULTI_VARIANTS = {
+    "pointmaze/medium-multi-v0": ("PointMaze_Medium_Diverse_GR-v3",  600, 0.45),
+    "pointmaze/large-multi-v0":  ("PointMaze_Large_Diverse_GR-v3",   800, 0.45),
 }
 
 
@@ -173,15 +223,24 @@ def register_pointmaze_envs():
 
     gym.register_envs(gymnasium_robotics)
 
-    for custom_id, (base_id, max_steps) in _VARIANTS.items():
+    for custom_id, (base_id, max_steps, reward_offset) in _VARIANTS.items():
         if custom_id not in gym.registry:
-            # Capture base_id and max_steps by value via default args.
             gym.register(
                 id=custom_id,
-                entry_point=lambda b=base_id, ms=max_steps: PointMazeGCWrapper(
-                    gym.make(b, max_episode_steps=ms)
+                entry_point=lambda b=base_id, ms=max_steps, ro=reward_offset: (
+                    PointMazeGCWrapper(gym.make(b, max_episode_steps=ms), reward_offset=ro)
                 ),
                 max_episode_steps=None,  # TimeLimit already applied inside
+            )
+
+    for custom_id, (base_id, max_steps, threshold) in _MULTI_VARIANTS.items():
+        if custom_id not in gym.registry:
+            gym.register(
+                id=custom_id,
+                entry_point=lambda b=base_id, ms=max_steps, t=threshold: (
+                    PointMazeMultiGoalWrapper(gym.make(b, max_episode_steps=ms), threshold=t)
+                ),
+                max_episode_steps=None,
             )
 
 
@@ -192,6 +251,7 @@ def register_custom_pointmaze_env(
     init_radius=0,
     reward_type="sparse",
     max_episode_steps=800,
+    multi_goal=False,
 ):
     """
     Generate a maze map from the given parameters, register it as a gymnasium env,
@@ -199,27 +259,44 @@ def register_custom_pointmaze_env(
 
     The returned ID is deterministic from the arguments, so the same call always
     produces the same ID and the env is only registered once.
+
+    multi_goal=True: uses PointMazeMultiGoalWrapper (obs=[x,y,vx,vy], reward vs nearest goal).
+    multi_goal=False: uses PointMazeGCWrapper (obs=[x,y,vx,vy,gx,gy], reward_type controls signal).
     """
     import gymnasium_robotics
 
     gym.register_envs(gymnasium_robotics)
 
     np_tag = "np" if narrow_passage else "op"
+    mg_tag = "mg" if multi_goal else reward_type
     env_id = (
-        f"pointmaze/custom_{rows}x{cols}_{np_tag}_ir{init_radius}_{reward_type}-v0"
+        f"pointmaze/custom_{rows}x{cols}_{np_tag}_ir{init_radius}_{mg_tag}-v0"
     )
 
     if env_id not in gym.registry:
         maze_map = make_map(rows, cols, narrow_passage, init_radius)
-        dense_suffix = "Dense" if reward_type == "dense" else ""
+        # Multi-goal always uses the sparse base (reward is recomputed in wrapper anyway)
+        dense_suffix = "Dense" if (not multi_goal and reward_type == "dense") else ""
         base_id = f"PointMaze_Large_Diverse_GR{dense_suffix}-v3"
 
-        gym.register(
-            id=env_id,
-            entry_point=lambda m=maze_map, b=base_id, ms=max_episode_steps: (
-                PointMazeGCWrapper(gym.make(b, maze_map=m, max_episode_steps=ms))
-            ),
-            max_episode_steps=None,
-        )
+        if multi_goal:
+            # Threshold: narrow passages need a larger capture radius
+            threshold = 1.5 if narrow_passage else 0.45
+            gym.register(
+                id=env_id,
+                entry_point=lambda m=maze_map, b=base_id, ms=max_episode_steps, t=threshold: (
+                    PointMazeMultiGoalWrapper(gym.make(b, maze_map=m, max_episode_steps=ms), threshold=t)
+                ),
+                max_episode_steps=None,
+            )
+        else:
+            reward_offset = 0.0 if reward_type == "dense" else -1.0
+            gym.register(
+                id=env_id,
+                entry_point=lambda m=maze_map, b=base_id, ms=max_episode_steps, ro=reward_offset: (
+                    PointMazeGCWrapper(gym.make(b, maze_map=m, max_episode_steps=ms), reward_offset=ro)
+                ),
+                max_episode_steps=None,
+            )
 
     return env_id

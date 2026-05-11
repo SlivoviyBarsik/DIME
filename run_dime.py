@@ -39,6 +39,7 @@ def _create_alg(cfg: DictConfig):
                 init_radius=m.init_radius,
                 reward_type=m.reward_type,
                 max_episode_steps=m.max_episode_steps,
+                multi_goal=m.multi_goal,
             )
 
     training_env = gym.make(env_name)
