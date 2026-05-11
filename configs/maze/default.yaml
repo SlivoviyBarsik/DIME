@@ -1,0 +1,6 @@
+rows: 3
+cols: 3
+narrow_passage: false
+init_radius: 0
+reward_type: sparse
+max_episode_steps: 800

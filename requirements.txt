@@ -14,3 +14,4 @@ shimmy==1.3.0
 hydra-core==1.3.2
 numpyro==0.15.3
 dm-control==1.0.14
+gymnasium-robotics==1.2.4

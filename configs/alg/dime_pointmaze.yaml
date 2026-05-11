@@ -1,0 +1,8 @@
+defaults:
+  - dime
+
+# PointMaze sparse reward is -1/step, 0 at goal.
+# Scale bounds to the largest variant (large maze, 800 steps).
+critic:
+  v_min: -800
+  v_max: 0

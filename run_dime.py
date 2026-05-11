@@ -25,9 +25,24 @@ def _create_alg(cfg: DictConfig):
         print("myosuite not installed")
         pass
 
-    training_env = gym.make(cfg.env_name)
-    eval_env = make_vec_env(cfg.env_name, n_envs=1, seed=cfg.seed)
     env_name_split = cfg.env_name.split('/')
+    env_name = cfg.env_name
+    if env_name_split[0] == 'pointmaze':
+        from common.envs.pointmaze import register_pointmaze_envs, register_custom_pointmaze_env
+        register_pointmaze_envs()
+        if env_name_split[1] == 'custom':
+            m = cfg.maze
+            env_name = register_custom_pointmaze_env(
+                rows=m.rows,
+                cols=m.cols,
+                narrow_passage=m.narrow_passage,
+                init_radius=m.init_radius,
+                reward_type=m.reward_type,
+                max_episode_steps=m.max_episode_steps,
+            )
+
+    training_env = gym.make(env_name)
+    eval_env = make_vec_env(env_name, n_envs=1, seed=cfg.seed)
     rb_class = None
     if env_name_split[0] == 'dm_control':
         rb_class = DMCCompatibleDictReplayBuffer if env_name_split[1].split('-')[0] in ['humanoid', 'fish', 'walker', 'quadruped','finger'] else None

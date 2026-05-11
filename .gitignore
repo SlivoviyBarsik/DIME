@@ -5,3 +5,6 @@ logs/
 wandb/
 eval_logs/
 outputs/
+
+*.npy
+.vscode/*
