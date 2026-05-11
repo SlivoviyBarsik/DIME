@@ -1,0 +1,24 @@
+_target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
+submitit_folder: ${hydra.sweep.dir}/.submitit/%j
+
+# Lightweight CPU job — useful for quick smoke-tests on the cluster.
+timeout_min: 60
+nodes: 1
+tasks_per_node: 1
+cpus_per_task: 4
+mem_gb: 16
+gres: null
+
+name: ${hydra.job.name}
+partition: null
+comment: null
+constraint: null
+exclude: null
+
+additional_parameters:
+  account: null
+
+setup: null
+
+array_parallelism: 256
+signal_delay_s: 60

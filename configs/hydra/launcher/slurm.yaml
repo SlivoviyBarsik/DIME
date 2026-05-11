@@ -1,0 +1,35 @@
+_target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
+submitit_folder: ${hydra.sweep.dir}/.submitit/%j
+
+# ── Time / resources ───────────────────────────────────────────────────────
+timeout_min: 2880       # 48 h (Compute Canada hard limit)
+nodes: 1
+tasks_per_node: 1
+cpus_per_task: 6        # typical for CC GPU nodes (v100l / a100)
+mem_gb: 40
+gres: gpu:1             # one GPU; use gpu:a100:1 or gpu:v100l:1 for a specific type
+
+# ── Scheduler ─────────────────────────────────────────────────────────────
+name: ${hydra.job.name}
+partition: null         # not needed on most Compute Canada clusters
+comment: null
+constraint: null
+exclude: null
+
+# ── Account (required on Compute Canada) ──────────────────────────────────
+# Set via CLI:  hydra.launcher.additional_parameters.account=def-yourpi
+# Or export DIME_ACCOUNT=def-yourpi and use multirun.sh.
+additional_parameters:
+  account: null
+
+# ── Environment setup ─────────────────────────────────────────────────────
+# Shell commands run inside the job before Python starts.
+# Uncomment and adjust for your cluster; the venv path must be absolute.
+setup: null
+#   - module load python/3.11
+#   - module load cuda/12.x
+#   - source ${SLURM_SUBMIT_DIR}/.venv/bin/activate
+
+# ── Misc ──────────────────────────────────────────────────────────────────
+array_parallelism: 16  # max concurrent jobs from one sweep
+signal_delay_s: 120     # seconds before timeout to send SIGTERM for cleanup
